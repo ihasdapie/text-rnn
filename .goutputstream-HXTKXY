@@ -1,0 +1,124 @@
+#!/usr/bin/python
+
+#imports
+
+import numpy as np
+import theano as theano
+import theano.tensor as T
+from utils import *
+import operator
+import csv
+import itertools
+import operator
+import nltk
+import sys
+import os
+import time
+from datetime import datetime
+from rnn_theano import RNNTheano
+
+#can be changed
+vocabsize= 8000
+starttoken='SENTENCE_START'
+unknowntoken='UKNOWN_TOKEN'
+endtoken= 'SENTENCE_END'
+
+#read data and add start+end tokens
+print 'reading CSV file'
+with open('/home/ihasdapie/Downloads/RNNtrainREDDIT.csv', 'rb') as f:
+	reader= csv.reader(f, skipinitialspace= True)
+	reader.next()
+	#split textdump into sentences
+	sentences= itertools.chain(*[nltk.sent_tokenize(x[0].decode('utf-8').lower()) for x in reader])
+	#add sentencestart and sentenceend tokens
+	sentences= ["%s %s %s" % (starttoken, x, endtoken) for x in sentences]
+print 'Parsed %d sentences. ' % (len(sentences))
+
+#tokenize senteces to words
+tokenizedsentences= [nltk.word_tokenize(words) for words in sentences]
+
+#count word frequencies; rarely used words can be omitted for resource conservation
+wordfreq= nltk.FreqDist(itertools.chain(*tokenizedsentences))
+print '%d unique word tokens.' % len(wordfreq.items())
+
+#get most common words and create index-words and word-index vectors
+vocab= wordfreq.most_common(vocabsize-1)
+indextoword= [x[0] for x in vocab]
+indextoword.append(unknowntoken)
+wordtoindex= dict([(w, i) for i,w in enumerate(indextoword)])
+
+print 'Vocabsize %d' % vocabsize
+print "The least frequent word is '%s', and appeared %d times" % (vocab[-1][0], vocab[-1][1])
+
+#replace all words not in the vocab with unknown token
+
+for i, words in enumerate(tokenizedsentences):
+	tokenizedsentences[i] = [w if w in wordtoindex else unknowntoken for w in words]
+
+print "\nExample sentence: '%s'" % sentences[0]
+print "\nExample sentence after Pre-processing: '%s'" % tokenizedsentences[0]
+
+#create training data
+Xtrain = np.asarray([[wordtoindex[w] for w in words[:-1]] for words in tokenizedsentences])
+ytrain = np.asarray([[wordtoindex[w] for w in words[1:]] for words in tokenizedsentences])
+
+
+#implementation
+
+class RNNumpy:
+	#worddim= size of vocab, hiddendim= size of hiddenlayer
+	def __init__(self, worddim, hiddendim=100, bptttruncate=4):
+		#assign inst. var
+		self.worddim = worddim
+		self.hiddendim= hiddendim
+		self.bptttruncate= bptttruncate
+
+		#random initialization of parameters
+		self.U = np.random.uniform(-np.sqrt(1./worddim), np.sqrt(1./worddim), (hiddendim, worddim))
+		self.V = np.random.uniform(-np.sqrt(1./hiddendim), np.sqrt(1./hiddendim), (worddim, hiddendim))
+		self.W = np.random.uniform(-np.sqrt(1./hiddendim), np.sqrt(1./hiddendim), (hiddendim, hiddendim))
+
+#forward propragation - Partially taken from the introductary nn code
+
+def forwardprop(self, x):
+	#total # of time-steps
+	T= len(x)
+	#must save all hidden stages of s
+	#add another element to hidden layer
+	s= np.zeros((T+1, self.hiddendim))
+	#the outputs at each time step
+	o= np.zeros((T, self.worddim))
+	#during every time step:
+	for t in np.arange(T):
+		#index U by x[t]; same as multiplying U with one (hot) vector
+		s[t] = np.tanh(self.U[:,x[t]] + self.W.dot(s[t-1]))
+		o[t] = softmax(self.V.dot(s[t]))
+	return [o, s]
+RNNumpy.forwardprop= forwardprop
+
+def perdict(self, x):
+	#take highest score of forward prop.
+	o, s= self.forwardprop(x)
+	return np.argmax(o, axis= 1)
+
+RNNumpy.perdict= perdict
+
+
+#see example output
+np.random.seed(10)
+model= RNNumpy(vocabsize)
+o, s = model.forwardprop(Xtrain[10])
+print o.shape
+print o
+
+perdictions= model.perdict(Xtrain[10])
+print perdictions.shape
+print perdictions
+
+def totalloss(self, x, y):
+	L= 0
+	for i in np.arange(len(y)):
+		o, s = self.forwardprop(x[i])
+		#only perdictions of correct words
+		correctwordpred = o[np.arange(len(y[1])), y[1]]
+		
